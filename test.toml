@@ -1,0 +1,12 @@
+# This is a TOML document.
+[header]
+lib = ['"math.h"', '<stdio.h>']
+  
+[data]
+mesh = [
+  { type = "Vector3", name = "positions", count = "10" },
+  { type = "int", name = "indices", count = "20" },
+  { type = "Vector2", name = "uvs", count = "10" }
+]
+
+foo = []
