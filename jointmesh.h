@@ -4,6 +4,8 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
+#include <assert.h>
 #include "math.h"
 #include <stdio.h>
 
@@ -39,6 +41,34 @@ static inline struct joint_mesh alloc_joint_mesh(void *(*mem_allocator)(size_t),
   data.uvs = (Vector2 *)((char *)(data.memory_block) + (data.offset[1]));
 
   return data;
+}
+
+struct joint_mesh *joint_mesh_copy(void *(*mem_allocator)(size_t), struct joint_mesh *lhs, struct joint_mesh *rhs) {
+  if (lhs == rhs) {
+    return rhs;
+  }
+  assert(((void) "lhs cannot be null", lhs != NULL));
+  assert(((void) "rhs cannot be null", rhs != NULL));
+
+  if (lhs->memory_block != rhs->memory_block) {
+    rhs->memory_block = mem_allocator(lhs->offset[2]);
+    if (rhs->memory_block == NULL) {
+      return NULL;
+    }
+    memcpy(rhs->memory_block, lhs->memory_block, lhs->offset[2]);
+  }
+
+  rhs->array_count = lhs->array_count;
+
+  rhs->offset[0] = lhs->offset[0];
+  rhs->offset[1] = lhs->offset[1];
+  rhs->offset[2] = lhs->offset[2];
+
+  rhs->positions = (Vector3 *)(rhs->memory_block);
+  rhs->indices = (int *)((char *)(rhs->memory_block) + (rhs->offset[0]));
+  rhs->uvs = (Vector2 *)((char *)(rhs->memory_block) + (rhs->offset[1]));
+
+  return rhs;
 }
 
 #endif /* __JOINTMESH_H__ */

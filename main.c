@@ -30,8 +30,28 @@ main(int argc, char* argv[])
     printf("; y -> %f\n", graph_mesh.uvs[c].y);
   };
 
+  struct joint_mesh mesh_copy = {0};
+  struct joint_mesh *result = joint_mesh_copy(malloc, &graph_mesh, &mesh_copy);
+
+  assert(result != NULL);
+
+  /* Verify memory is copied to new mesh */
+  printf("\nVerifying memory copy...\n");
+  for (int c = 0; c < 10; c++) {
+    printf("Position [%d]: x -> %f", c, graph_mesh.positions[c].x);
+    printf("; y -> %f", graph_mesh.positions[c].y);
+    printf("; z -> %f\n", graph_mesh.positions[c].z);
+  };
+  printf("\n");
+
+  for (int c = 0; c < 10; c++) {
+    printf("UV [%d]: x -> %f", c, graph_mesh.uvs[c].x);
+    printf("; y -> %f\n", graph_mesh.uvs[c].y);
+  };
+
   /* Don't forget to clean up memory block */
   free(graph_mesh.memory_block);
+  free(mesh_copy.memory_block);
  
   return 0;
 }
