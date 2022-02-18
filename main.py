@@ -5,11 +5,6 @@ import os
 import sys
 import toml
 
-usage_message = """
-ordnat: fatal error: no input file
-compilation terminated.
-"""
-
 
 def get_toml_from_file(filename):
     """Returns the TOML structure for the given filename."""
@@ -147,10 +142,6 @@ def print_copy_method(struct_name, field_count, struct_members):
 
     print("\n  return rhs;")
     print("}\n")
-
-
-def usage():
-    print(usage_message)
 
 
 def parse_args():
