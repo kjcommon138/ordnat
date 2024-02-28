@@ -6,69 +6,229 @@
 #include <stdint.h>
 #include <string.h>
 #include <assert.h>
+#include "ordnat.h"
 #include "math.h"
 #include <stdio.h>
 
 /* mesh structure with joint memory allocation */
 struct joint_mesh {
-  Vector3 *positions;
-  int *indices;
-  Vector2 *uvs;
+  Vector3 *position;
+  int *index;
+  Vector2 *uv;
 
   void *memory_block;
-  int array_count;
-  int32_t offset[3];
+  uint32_t offset[3];
 };
 
-static inline struct joint_mesh alloc_joint_mesh(void *(*mem_allocator)(size_t), size_t n_positions, size_t n_indices, size_t n_uvs) {
-  int32_t current_offset = 0;
-  struct joint_mesh data = { 0 };
-  data.array_count = 3;
+static inline void free_joint_mesh(void (*mem_dealloc)(void *), struct joint_mesh *m_joint) {
+  assert(((void) "m_joint cannot be null", m_joint != NULL));
+  mem_dealloc(m_joint->memory_block);
 
-  current_offset += ((sizeof(Vector3)) * (n_positions));
+  m_joint->position = NULL;
+  m_joint->index = NULL;
+  m_joint->uv = NULL;
+
+  for (int i = 0; i < 3; i++) {
+    m_joint->offset[i] = 0;
+  }
+}
+
+static inline struct joint_mesh alloc_joint_mesh(void *(*mem_alloc)(size_t), size_t n_position, size_t n_index, size_t n_uv) {
+  assert(((void) "n_position cannot be 0", n_position > 0));
+  assert(((void) "n_index cannot be 0", n_index > 0));
+  assert(((void) "n_uv cannot be 0", n_uv > 0));
+
+  uint32_t current_offset = 0;
+  struct joint_mesh data = { 0 };
+
+  current_offset += ((sizeof(Vector3)) * (n_position));
   data.offset[0] = current_offset;
 
-  current_offset += ((sizeof(int)) * (n_indices));
+  data.index = (void *) (uintptr_t)current_offset;
+  current_offset += ((sizeof(int)) * (n_index));
   data.offset[1] = current_offset;
 
-  current_offset += ((sizeof(Vector2)) * (n_uvs));
+  data.uv = (void *) (uintptr_t)current_offset;
+  current_offset += ((sizeof(Vector2)) * (n_uv));
   data.offset[2] = current_offset;
 
-  data.memory_block = mem_allocator(current_offset);
+  data.memory_block = mem_alloc(current_offset);
+  assert(((void) "memory_block cannot be NULL", data.memory_block != NULL));
 
-  data.positions = (Vector3 *)(data.memory_block);
-  data.indices = (int *)((char *)(data.memory_block) + (data.offset[0]));
-  data.uvs = (Vector2 *)((char *)(data.memory_block) + (data.offset[1]));
+  data.position = (Vector3 *)(data.memory_block);
+  data.index = (void *)(((uintptr_t) data.index) + ((uintptr_t) data.memory_block));
+  data.uv = (void *)(((uintptr_t) data.uv) + ((uintptr_t) data.memory_block));
 
   return data;
 }
 
-struct joint_mesh *joint_mesh_copy(void *(*mem_allocator)(size_t), struct joint_mesh *lhs, struct joint_mesh *rhs) {
+static inline struct joint_mesh alloc_joint_mesh_soa(void *(*mem_alloc)(size_t), size_t n_meshs) {
+  assert(((void) "n_meshs cannot be 0", n_meshs > 0));
+
+  uint32_t current_offset = 0;
+  struct joint_mesh data_soa = { 0 };
+
+  current_offset += ((sizeof(Vector3)) * (n_meshs));
+  data_soa.offset[0] = current_offset;
+
+  data_soa.index = (void *) (uintptr_t)current_offset;
+  current_offset += ((sizeof(int)) * (n_meshs));
+  data_soa.offset[1] = current_offset;
+
+  data_soa.uv = (void *) (uintptr_t)current_offset;
+  current_offset += ((sizeof(Vector2)) * (n_meshs));
+  data_soa.offset[2] = current_offset;
+
+  data_soa.memory_block = mem_alloc(current_offset);
+  assert(((void) "memory_block cannot be NULL", data_soa.memory_block != NULL));
+
+  data_soa.position = (Vector3 *)(data_soa.memory_block);
+  data_soa.index = (void *)(((uintptr_t) data_soa.index) + ((uintptr_t) data_soa.memory_block));
+  data_soa.uv = (void *)(((uintptr_t) data_soa.uv) + ((uintptr_t) data_soa.memory_block));
+
+  return data_soa;
+}
+
+static inline struct joint_mesh realloc_joint_mesh(void *(*mem_alloc)(size_t), void (*mem_dealloc)(void *), struct joint_mesh *m_joint, size_t n_position, size_t n_index, size_t n_uv) {
+  if (n_position <= 0 && n_index <= 0 && n_uv <= 0) {
+    free_joint_mesh(mem_dealloc, m_joint);
+    return *m_joint;
+  }
+
+  assert(((void) "n_position cannot be 0", n_position > 0));
+  assert(((void) "n_index cannot be 0", n_index > 0));
+  assert(((void) "n_uv cannot be 0", n_uv > 0));
+
+  uint32_t current_offset = 0;
+  struct joint_mesh data = { 0 };
+
+  current_offset += ((sizeof(Vector3)) * (n_position));
+  data.offset[0] = current_offset;
+
+  data.index = (int *) (uintptr_t)current_offset;
+  current_offset += ((sizeof(int)) * (n_index));
+  data.offset[1] = current_offset;
+
+  data.uv = (Vector2 *) (uintptr_t)current_offset;
+  current_offset += ((sizeof(Vector2)) * (n_uv));
+  data.offset[2] = current_offset;
+
+  if (current_offset < m_joint->offset[2]) {
+    return *m_joint;
+  }
+
+  data.memory_block = mem_alloc(current_offset);
+  if (data.memory_block == NULL) {
+    return *m_joint;
+  }
+
+  data.position = (Vector3 *)(data.memory_block);
+  data.index = (void *)(((uintptr_t) data.index) + ((uintptr_t) data.memory_block));
+  data.uv = (void *)(((uintptr_t) data.uv) + ((uintptr_t) data.memory_block));
+
+  memcpy(data.position, m_joint->position, min(data.offset[0], m_joint->offset[0]));
+  memcpy(data.index, m_joint->index, min(data.offset[1] - data.offset[1 - 1], m_joint->offset[1] - m_joint->offset[1 - 1]));
+  memcpy(data.uv, m_joint->uv, min(data.offset[2] - data.offset[2 - 1], m_joint->offset[2] - m_joint->offset[2 - 1]));
+
+  free_joint_mesh(mem_dealloc, m_joint);
+
+  return data;
+}
+
+struct joint_mesh *copy_joint_mesh(void *(*mem_alloc)(size_t), void (*mem_dealloc)(void *), struct joint_mesh *lhs, struct joint_mesh *rhs) {
   if (lhs == rhs) {
     return rhs;
   }
+
   assert(((void) "lhs cannot be null", lhs != NULL));
   assert(((void) "rhs cannot be null", rhs != NULL));
 
   if (lhs->memory_block != rhs->memory_block) {
-    rhs->memory_block = mem_allocator(lhs->offset[2]);
+    mem_dealloc(rhs->memory_block);
+
+    rhs->memory_block = mem_alloc(lhs->offset[2]);
     if (rhs->memory_block == NULL) {
       return NULL;
     }
+
     memcpy(rhs->memory_block, lhs->memory_block, lhs->offset[2]);
   }
 
-  rhs->array_count = lhs->array_count;
-
   rhs->offset[0] = lhs->offset[0];
+
+  rhs->index = (int *) (uintptr_t)lhs->offset[0];
   rhs->offset[1] = lhs->offset[1];
+
+  rhs->uv = (Vector2 *) (uintptr_t)lhs->offset[1];
   rhs->offset[2] = lhs->offset[2];
 
-  rhs->positions = (Vector3 *)(rhs->memory_block);
-  rhs->indices = (int *)((char *)(rhs->memory_block) + (rhs->offset[0]));
-  rhs->uvs = (Vector2 *)((char *)(rhs->memory_block) + (rhs->offset[1]));
+  rhs->position = (Vector3 *)(rhs->memory_block);
+  rhs->index = (void *)(((uintptr_t) rhs->index) + ((uintptr_t) rhs->memory_block));
+  rhs->uv = (void *)(((uintptr_t) rhs->uv) + ((uintptr_t) rhs->memory_block));
 
   return rhs;
 }
+
+/* Macros for joint_mesh data iteration. */
+
+/* Macros for position field iteration. */
+
+#define foreach_joint_mesh_position(joint_name, item_name, loop) \
+  foreach_joint(joint_name, item_name, position, 0, loop)
+
+#define foreach_range_joint_mesh_position(joint_name, item_name, itr, loop) \
+  foreach_range_joint(joint_name, item_name, position, itr, 0, loop)
+
+#define for_joint_mesh_position(joint_name, item_name, start, end, itr, loop) \
+  for_range_joint(joint_name, item_name, position, start, end, step, itr, 0, loop)
+
+#define for_range_joint_mesh_position(joint_name, item_name, start, end, itr, loop) \
+  for_range_joint(joint_name, item_name, position, start, end, 1, itr, 0, loop)
+
+#define for_down_joint_mesh_position(joint_name, item_name, start, end, itr, loop) \
+  for_range_down_joint(joint_name, item_name, position, start, end, step, itr, loop)
+
+#define for_range_down_joint_mesh_position(joint_name, item_name, start, end, itr, loop) \
+  for_range_down_joint(joint_name, item_name, position, start, end, 1, itr, loop)
+
+/* Macros for index field iteration. */
+
+#define foreach_joint_mesh_index(joint_name, item_name, loop) \
+  foreach_joint(joint_name, item_name, index, 1, loop)
+
+#define foreach_range_joint_mesh_index(joint_name, item_name, itr, loop) \
+  foreach_range_joint(joint_name, item_name, index, itr, 1, loop)
+
+#define for_joint_mesh_index(joint_name, item_name, start, end, itr, loop) \
+  for_range_joint(joint_name, item_name, index, start, end, step, itr, 1, loop)
+
+#define for_range_joint_mesh_index(joint_name, item_name, start, end, itr, loop) \
+  for_range_joint(joint_name, item_name, index, start, end, 1, itr, 1, loop)
+
+#define for_down_joint_mesh_index(joint_name, item_name, start, end, itr, loop) \
+  for_range_down_joint(joint_name, item_name, index, start, end, step, itr, loop)
+
+#define for_range_down_joint_mesh_index(joint_name, item_name, start, end, itr, loop) \
+  for_range_down_joint(joint_name, item_name, index, start, end, 1, itr, loop)
+
+/* Macros for uv field iteration. */
+
+#define foreach_joint_mesh_uv(joint_name, item_name, loop) \
+  foreach_joint(joint_name, item_name, uv, 2, loop)
+
+#define foreach_range_joint_mesh_uv(joint_name, item_name, itr, loop) \
+  foreach_range_joint(joint_name, item_name, uv, itr, 2, loop)
+
+#define for_joint_mesh_uv(joint_name, item_name, start, end, itr, loop) \
+  for_range_joint(joint_name, item_name, uv, start, end, step, itr, 2, loop)
+
+#define for_range_joint_mesh_uv(joint_name, item_name, start, end, itr, loop) \
+  for_range_joint(joint_name, item_name, uv, start, end, 1, itr, 2, loop)
+
+#define for_down_joint_mesh_uv(joint_name, item_name, start, end, itr, loop) \
+  for_range_down_joint(joint_name, item_name, uv, start, end, step, itr, loop)
+
+#define for_range_down_joint_mesh_uv(joint_name, item_name, start, end, itr, loop) \
+  for_range_down_joint(joint_name, item_name, uv, start, end, 1, itr, loop)
 
 #endif /* __JOINTMESH_H__ */

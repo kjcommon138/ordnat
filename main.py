@@ -47,6 +47,7 @@ def print_data_structs(parsed_toml, output='joint_memory.h'):
     print("#include <stdint.h>")
     print("#include <string.h>")
     print("#include <assert.h>")
+    print("#include \"ordnat.h\"")
 
     if parsed_toml['header']:
         for library in parsed_toml['header']['lib']:
@@ -67,78 +68,234 @@ def print_data_structs(parsed_toml, output='joint_memory.h'):
             print("  {0} *{1};".format(field['type'], field['name']))
 
         print("\n  void *memory_block;")
-        print("  int array_count;")
-        print("  int32_t offset[{0}];".format(field_count))
+        print("  uint32_t offset[{0}];".format(field_count))
         print("};\n")
 
-        # Generate allocation method
-        print_alloc_method(struct_name, field_count, struct_members)
+        # Generate free method
+        print_free_method(struct_name, field_count, struct_members)
+
+        # Generate allocation methods
+        print_alloc_method(struct_name, struct_members)
+        print_alloc_soa_method(struct_name, struct_members)
+
+        # Generate realloc method
+        print_realloc_method(struct_name, struct_members)
 
         # Generate copy method
         print_copy_method(struct_name, field_count, struct_members)
+
+        # Generate foreach macros
+        print_foreach_macros(struct_name, struct_members)
 
     # Header file epilogue
     print("#endif /* __{0}__ */".format(header_name))
 
 
-def print_alloc_method(struct_name, field_count, struct_members):
+def print_foreach_macros(struct_name, struct_members):
+    """Generate macros to safely iterate through range of each field in joint data structure."""
+    print("/* Macros for joint_{0} data iteration. */\n".format(struct_name))
+
+    for (i, field) in enumerate(struct_members):
+        print("/* Macros for {0} field iteration. */\n".format(field['name']))
+        print("#define foreach_joint_{0}_{1}(joint_name, item_name, loop) \\".format(struct_name, field['name']))
+        print("  foreach_joint(joint_name, item_name, {0}, {1}, loop)\n".format(field['name'], i))
+
+        print("#define foreach_range_joint_{0}_{1}(joint_name, item_name, itr, loop) \\".format(
+            struct_name, field['name']
+            ))
+        print("  foreach_range_joint(joint_name, item_name, {0}, itr, {1}, loop)\n".format(field['name'], i))
+
+        print("#define for_joint_{0}_{1}(joint_name, item_name, start, end, itr, loop) \\".format(
+            struct_name, field['name']
+            ))
+        print("  for_range_joint(joint_name, item_name, {0}, start, end, step, itr, {1}, loop)\n".format(field['name'], i))
+
+        print("#define for_range_joint_{0}_{1}(joint_name, item_name, start, end, itr, loop) \\".format(
+            struct_name, field['name']
+            ))
+        print("  for_range_joint(joint_name, item_name, {0}, start, end, 1, itr, {1}, loop)\n".format(field['name'], i))
+
+        print("#define for_down_joint_{0}_{1}(joint_name, item_name, start, end, itr, loop) \\".format(
+            struct_name, field['name']
+            ))
+        print("  for_range_down_joint(joint_name, item_name, {0}, start, end, step, itr, loop)\n".format(field['name']))
+
+        print("#define for_range_down_joint_{0}_{1}(joint_name, item_name, start, end, itr, loop) \\".format(
+            struct_name, field['name']
+            ))
+        print("  for_range_down_joint(joint_name, item_name, {0}, start, end, 1, itr, loop)\n".format(field['name']))
+
+
+def print_free_method(struct_name, field_count, struct_members):
+    """Generate function to deallocate joint data structure."""
+    print("static inline void free_joint_{0}(void (*mem_dealloc)(void *), struct joint_{0} *m_joint) {{".format(struct_name))
+    print("  assert(((void) \"m_joint cannot be null\", m_joint != NULL));")
+    print("  mem_dealloc(m_joint->memory_block);")
+
+    if field_count:
+        print()
+        for field in struct_members:
+            print("  m_joint->{0} = NULL;".format(field['name']))
+
+        print("\n  for (int i = 0; i < {0}; i++) {{".format(field_count))
+        print("    m_joint->offset[i] = 0;")
+        print("  }")
+
+    print("}\n")
+
+
+def print_alloc_method(struct_name, struct_members):
     """Generate function to allocate joint data structure."""
     field_params = [('n_' + field['name']) for field in struct_members]
     param_str = ', '.join(["size_t {0}".format(i) for i in field_params])
 
-    print("static inline struct joint_{0} alloc_joint_{0}(void *(*mem_allocator)(size_t), {1}) {{".format(struct_name, param_str))
-    print("  int32_t current_offset = 0;")
-    print("  struct joint_{0} data = {{ 0 }};".format(struct_name))
-    print("  data.array_count = {0};\n".format(field_count))
+    print("static inline struct joint_{0} alloc_joint_{0}(void *(*mem_alloc)(size_t), {1}) {{".format(struct_name, param_str))
+    for i in range(len(struct_members)):
+        print("  assert(((void) \"{0} cannot be 0\", {0} > 0));".format(field_params[i]))
+
+    print("\n  uint32_t current_offset = 0;")
+    print("  struct joint_{0} data = {{ 0 }};\n".format(struct_name))
 
     for (i, field) in enumerate(struct_members):
+        if i > 0:
+            print("  data.{0} = (void *) (uintptr_t)current_offset;".format(field['name']))
+
         print("  current_offset += ((sizeof({0})) * ({1}));".format(field['type'], field_params[i]))
         print("  data.offset[{0}] = current_offset;".format(i))
         print()
 
-    print("  data.memory_block = mem_allocator(current_offset);\n")
+    print("  data.memory_block = mem_alloc(current_offset);")
+    print("  assert(((void) \"memory_block cannot be NULL\", data.memory_block != NULL));\n")
 
     for (i, field) in enumerate(struct_members):
-        if i == 0:
-            print("  data.{0} = ({1} *)(data.memory_block);".format(field['name'], field['type']))
+        if i > 0:
+            print("  data.{0} = (void *)(((uintptr_t) data.{0}) + ((uintptr_t) data.memory_block));".format(field['name']))
         else:
-            print("  data.{0} = ({1} *)((char *)(data.memory_block) + (data.offset[{2}]));".format(field['name'], field['type'], i - 1))
+            print("  data.{0} = ({1} *)(data.memory_block);".format(field['name'], field['type']))
 
     print("\n  return data;")
     print("}\n")
 
 
+def print_alloc_soa_method(struct_name, struct_members):
+    """Generate function to allocate uniform SOA joint data structure."""
+    field_param = "n_{0}s".format(struct_name)
+
+    print("static inline struct joint_{0} alloc_joint_{0}_soa(void *(*mem_alloc)(size_t), size_t {1}) {{".format(struct_name, field_param))
+    print("  assert(((void) \"{0} cannot be 0\", {0} > 0));".format(field_param))
+
+    print("\n  uint32_t current_offset = 0;")
+    print("  struct joint_{0} data_soa = {{ 0 }};\n".format(struct_name))
+
+    for (i, field) in enumerate(struct_members):
+        if i > 0:
+            print("  data_soa.{0} = (void *) (uintptr_t)current_offset;".format(field['name']))
+
+        print("  current_offset += ((sizeof({0})) * ({1}));".format(field['type'], field_param))
+        print("  data_soa.offset[{0}] = current_offset;".format(i))
+        print()
+
+    print("  data_soa.memory_block = mem_alloc(current_offset);")
+    print("  assert(((void) \"memory_block cannot be NULL\", data_soa.memory_block != NULL));\n")
+
+    for (i, field) in enumerate(struct_members):
+        if i > 0:
+            print("  data_soa.{0} = (void *)(((uintptr_t) data_soa.{0}) + ((uintptr_t) data_soa.memory_block));".format(field['name']))
+        else:
+            print("  data_soa.{0} = ({1} *)(data_soa.memory_block);".format(field['name'], field['type']))
+
+
+    print("\n  return data_soa;")
+    print("}\n")
+
+
+def print_realloc_method(struct_name, struct_members):
+    """Generate function to reallocate joint data structure."""
+    field_params = [('n_' + field['name']) for field in struct_members]
+    param_str = ', '.join(["size_t {0}".format(i) for i in field_params])
+    compound_field_check = " && ".join(["{0} <= 0".format('n_' + field['name']) for field in struct_members])
+
+    print("static inline struct joint_{0} realloc_joint_{0}(void *(*mem_alloc)(size_t), void (*mem_dealloc)(void *), struct joint_{0} *m_joint, {1}) {{".format(struct_name, param_str))
+    print("  if ({0}) {{".format(compound_field_check))
+    print("    free_joint_{0}(mem_dealloc, m_joint);".format(struct_name))
+    print("    return *m_joint;")
+    print("  }\n")
+
+    for i in range(len(struct_members)):
+        print("  assert(((void) \"{0} cannot be 0\", {0} > 0));".format(field_params[i]))
+
+    print("\n  uint32_t current_offset = 0;")
+    print("  struct joint_{0} data = {{ 0 }};\n".format(struct_name))
+
+    for (i, field) in enumerate(struct_members):
+        if i > 0:
+            print("  data.{0} = ({1} *) (uintptr_t)current_offset;".format(field['name'], field['type']))
+
+        print("  current_offset += ((sizeof({0})) * ({1}));".format(field['type'], field_params[i]))
+        print("  data.offset[{0}] = current_offset;".format(i))
+        print()
+
+    print("  if (current_offset < m_joint->offset[{0}]) {{".format(len(struct_members) - 1))
+    print("    return *m_joint;")
+    print("  }\n")
+
+    print("  data.memory_block = mem_alloc(current_offset);")
+    print("  if (data.memory_block == NULL) {")
+    print("    return *m_joint;")
+    print("  }\n")
+
+    for (i, field) in enumerate(struct_members):
+        if i > 0:
+            print("  data.{0} = (void *)(((uintptr_t) data.{0}) + ((uintptr_t) data.memory_block));".format(field['name']))
+        else:
+            print("  data.{0} = ({1} *)(data.memory_block);".format(field['name'], field['type']))
+
+    for (i, field) in enumerate(struct_members):
+        if i > 0:
+            data_size = "data.offset[{0}] - data.offset[{0} - 1]".format(i)
+            m_joint_size = "m_joint->offset[{0}] - m_joint->offset[{0} - 1]".format(i)
+        else:
+            print()
+            data_size = "data.offset[0]"
+            m_joint_size = "m_joint->offset[0]"
+
+        print("  memcpy(data.{0}, m_joint->{0}, min({1}, {2}));".format(field['name'], data_size, m_joint_size))
+
+    print("\n  free_joint_{0}(mem_dealloc, m_joint);".format(struct_name))
+    print("\n  return data;")
+    print("}\n")
+
 def print_copy_method(struct_name, field_count, struct_members):
     """Generate copy function for joint data structure."""
-    print("struct joint_{0} *joint_{0}_copy(void *(*mem_allocator)(size_t), struct joint_{0} *lhs, struct joint_{0} *rhs) {{".format(struct_name))
+    print("struct joint_{0} *copy_joint_{0}(void *(*mem_alloc)(size_t), void (*mem_dealloc)(void *), struct joint_{0} *lhs, struct joint_{0} *rhs) {{".format(struct_name))
     print("  if (lhs == rhs) {")
     print("    return rhs;")
-    print("  }")
+    print("  }\n")
 
     print("  assert(((void) \"lhs cannot be null\", lhs != NULL));")
     print("  assert(((void) \"rhs cannot be null\", rhs != NULL));")
 
     # Copy memory_block from lhs to rhs
     print("\n  if (lhs->memory_block != rhs->memory_block) {")
-    print("    rhs->memory_block = mem_allocator(lhs->offset[{0}]);".format(field_count - 1))
+    print("    mem_dealloc(rhs->memory_block);")
+    print("\n    rhs->memory_block = mem_alloc(lhs->offset[{0}]);".format(field_count - 1))
     print("    if (rhs->memory_block == NULL) {")
     print("      return NULL;")
     print("    }")
-    print("    memcpy(rhs->memory_block, lhs->memory_block, lhs->offset[{0}]);".format(field_count - 1))
-    print("  }")
+    print("\n    memcpy(rhs->memory_block, lhs->memory_block, lhs->offset[{0}]);".format(field_count - 1))
+    print("  }\n")
 
     # Copy offsets from lhs to rhs
-    print("\n  rhs->array_count = lhs->array_count;\n")
+    for (i, field) in enumerate(struct_members):
+        if i > 0:
+            print("  rhs->{0} = ({1} *) (uintptr_t)lhs->offset[{2}];".format(field['name'], field['type'], i-1))
+        print("  rhs->offset[{0}] = lhs->offset[{0}];\n".format(i))
 
     for (i, field) in enumerate(struct_members):
-        print("  rhs->offset[{0}] = lhs->offset[{0}];".format(i))
-
-    print()
-    for (i, field) in enumerate(struct_members):
-        if i == 0:
-            print("  rhs->{0} = ({1} *)(rhs->memory_block);".format(field['name'], field['type']))
+        if i > 0:
+            print("  rhs->{0} = (void *)(((uintptr_t) rhs->{0}) + ((uintptr_t) rhs->memory_block));".format(field['name']))
         else:
-            print("  rhs->{0} = ({1} *)((char *)(rhs->memory_block) + (rhs->offset[{2}]));".format(field['name'], field['type'], i - 1))
+            print("  rhs->{0} = ({1} *)(rhs->memory_block);".format(field['name'], field['type']))
 
     print("\n  return rhs;")
     print("}\n")
