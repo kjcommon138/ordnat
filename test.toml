@@ -4,9 +4,9 @@ lib = ['"math.h"', '<stdio.h>']
 
 [data]
 mesh = [
-  { type = "Vector3", name = "position", count = "10" },
-  { type = "int", name = "index", count = "20" },
-  { type = "Vector2", name = "uv", count = "10" }
+  { type = "Vector3", name = "position" },
+  { type = "int", name = "index" },
+  { type = "Vector2", name = "uv" }
 ]
 
 foo = []

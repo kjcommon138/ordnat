@@ -36,12 +36,12 @@ See `test.toml` for examples of data structure definitions.
 lib = ['"math.h"', '<stdio.h>']
 
 # Example field in data struct:
-# { type = "int", name = "foo", count = "5" }
+# { type = "int", name = "foo" }
 [data]
 mesh = [
-  { type = "Vector3", name = "positions", count = "10" },
-  { type = "int", name = "indices", count = "20" },
-  { type = "Vector2", name = "uvs", count = "10" }
+  { type = "Vector3", name = "position" },
+  { type = "int", name = "index" },
+  { type = "Vector2", name = "uv" }
 ]
 ```
 
